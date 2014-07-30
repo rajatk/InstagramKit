@@ -11,4 +11,10 @@ Credits: [SVPullToRefresh](https://github.com/samvermette/SVPullToRefresh), one 
 
 ==================
 
+##Installation
+
+Make sure to run 'pod install' and add your Instagram App Client ID in the .plist file before you test this.
+
+==================
+
 ~ [@veryrajat](https://twitter.com/veryrajat)
