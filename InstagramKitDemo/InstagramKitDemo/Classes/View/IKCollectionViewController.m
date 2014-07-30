@@ -27,12 +27,17 @@
 #import "IKLoginViewController.h"
 #import "IKMediaViewController.h"
 
+#import <SVPullToRefresh.h>
+
+const bool infiniteScrollingMode = YES;
+
 @interface IKCollectionViewController ()
 {
     NSMutableArray *mediaArray;
     __weak IBOutlet UITextField *textField;
 }
 @property (nonatomic, strong) InstagramPaginationInfo *currentPaginationInfo;
+@property bool isLoadingInfinitely;
 @end
 
 @implementation IKCollectionViewController
@@ -49,11 +54,42 @@
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    [self loadMedia];
+	
+	if ([self respondsToSelector:@selector(automaticallyAdjustsScrollViewInsets)]) {
+        self.automaticallyAdjustsScrollViewInsets = NO;
+		
+        UIEdgeInsets insets = self.collectionView.contentInset;
+		
+		insets.top = self.navigationController.navigationBar.bounds.size.height +
+		[UIApplication sharedApplication].statusBarFrame.size.height;
+        self.collectionView.contentInset = insets;
+        self.collectionView.scrollIndicatorInsets = insets;
+    }
+	
+	__weak typeof(self) weakSelf = self;
+	__weak typeof(mediaArray) weakMediaArray = mediaArray;
+	[self.collectionView addInfiniteScrollingWithActionHandler:^{
+		[weakSelf loadMedia];
+	}];
+	
+	[self.collectionView addPullToRefreshWithActionHandler:^{
+		weakSelf.collectionView.showsInfiniteScrolling = NO;
+		[weakMediaArray removeAllObjects];
+		[weakSelf.collectionView reloadData];
+		[weakSelf reloadMedia];
+		[weakSelf.collectionView.pullToRefreshView stopAnimating];
+		[weakSelf.collectionView.infiniteScrollingView stopAnimating];
+	}];
+	
+	[self loadMedia];
 }
 
 - (IBAction)reloadMedia
 {
+	//scroll to top
+	if([self.collectionView numberOfItemsInSection:0] > 1)
+		[self.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0] atScrollPosition:UICollectionViewScrollPositionTop animated:YES];
+	
     self.currentPaginationInfo = nil;
     if (mediaArray) {
         [mediaArray removeAllObjects];
@@ -98,14 +134,20 @@
 
 - (void)testLoadPopularMedia
 {
+	if(_isLoadingInfinitely)
+	return;
+	_isLoadingInfinitely = YES;
+	
     [[InstagramEngine sharedEngine] getPopularMediaWithSuccess:^(NSArray *media, InstagramPaginationInfo *paginationInfo) {
-        [mediaArray removeAllObjects];
+		if(!infiniteScrollingMode)
+			[mediaArray removeAllObjects];
         [mediaArray addObjectsFromArray:media];
         [self reloadData];
+		_isLoadingInfinitely = NO;
+		self.collectionView.showsInfiniteScrolling = YES;
     } failure:^(NSError *error) {
         NSLog(@"Load Popular Media Failed");
     }];
-
 }
 
 - (void)getSelfUserDetails
@@ -120,12 +162,18 @@
 
 - (void)testLoadSelfFeed
 {
-    [[InstagramEngine sharedEngine] getSelfFeedWithCount:15 maxId:self.currentPaginationInfo.nextMaxId success:^(NSArray *media, InstagramPaginationInfo *paginationInfo) {
+	if(_isLoadingInfinitely)
+		return;
+	_isLoadingInfinitely = YES;
+	
+    [[InstagramEngine sharedEngine] getSelfFeedWithCount:18 maxId:self.currentPaginationInfo.nextMaxId success:^(NSArray *media, InstagramPaginationInfo *paginationInfo) {
         self.currentPaginationInfo = paginationInfo;
         
-        [mediaArray addObjectsFromArray:media];
-        
+		[mediaArray addObjectsFromArray:media];
         [self reloadData];
+		_isLoadingInfinitely = NO;
+		self.collectionView.showsInfiniteScrolling = YES;
+		[self.collectionView.infiniteScrollingView stopAnimating];
     } failure:^(NSError *error) {
         NSLog(@"Request Self Feed Failed");
     }];
@@ -221,7 +269,11 @@
 
 - (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section
 {
-    return mediaArray.count;
+	//I prefer the last row to have three items
+	if(mediaArray.count > 2)
+		return mediaArray.count - (mediaArray.count % 3);
+	else
+		return mediaArray.count;
 }
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath
@@ -236,6 +288,20 @@
         [cell.imageView setImage:nil];
     return cell;
 
+}
+
+
+-(void)scrollViewDidScroll:(UIScrollView *)scrollView{
+
+	//Must be pulling to refresh. Ignore this
+	if(scrollView.contentOffset.y < -64)
+		return;
+	
+	int diff = abs(abs(scrollView.contentOffset.y - scrollView.contentSize.height) - 568);
+	if(abs(diff - 60) < 10){
+//		NSLog(@"triggered Refresh");
+		[self.collectionView triggerInfiniteScrolling];
+	}
 }
 
 - (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath
